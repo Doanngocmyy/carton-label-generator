@@ -5,8 +5,9 @@ Streamlit web app for carton_label_generator.py
 
 Lets someone with no Python installed:
   1. Upload the Packing List Excel (.xlsx)
-  2. Click "Generate labels"
-  3. Download the 4x6" label PDF and the audit CSV
+  2. (optional) type a Shipping Mark
+  3. Click "Generate labels"
+  4. Download the 4x6" label PDF and the audit CSV
 
 Run locally:
     pip install -r requirements.txt
@@ -45,6 +46,13 @@ if TEMPLATE_PATH.exists():
 
 uploaded_file = st.file_uploader("Packing List (.xlsx)", type=["xlsx"])
 
+shipping_mark = st.text_input(
+    "Shipping Mark (tùy chọn)",
+    value="",
+    help="Nếu điền, giá trị này sẽ in đậm/to ngay dưới dòng PO No. trên mỗi tem "
+         "(ví dụ: OR). Để trống nếu không cần.",
+)
+
 max_skus = 3  # fixed default, matches the original script
 
 run = st.button("Generate labels", type="primary", disabled=uploaded_file is None)
@@ -65,6 +73,7 @@ if run and uploaded_file is not None:
                         input_file=input_path,
                         output_dir=output_dir,
                         max_skus_per_label=max_skus,
+                        shipping_mark=shipping_mark.strip() or None,
                     )
                 pdf_bytes = Path(output_pdf).read_bytes()
                 csv_bytes = Path(output_csv).read_bytes()

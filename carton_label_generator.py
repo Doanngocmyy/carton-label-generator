@@ -646,7 +646,7 @@ def draw_product_barcode(c, item: LabelItem, x, y, max_width, max_height, font_r
 # ============================================================================
 
 def draw_header(c, po_no, packaging_code, top_y, font_reg, font_bold,
-                 label_index=1, label_total=1):
+                 label_index=1, label_total=1, shipping_mark=None):
     """
     Layout notes: the packaging-code barcode is alphanumeric (e.g.
     'PGKEC2C17JSH3170001', 20 chars) and needs far more horizontal room than
@@ -677,6 +677,17 @@ def draw_header(c, po_no, packaging_code, top_y, font_reg, font_bold,
     po_size = fit_font_size(po_text, font_reg, 7.6, 5.5, right_margin_x - po_value_x)
     c.setFont(font_reg, po_size)
     c.drawString(po_value_x, top_y, po_text)
+
+    # Shipping Mark: printed directly below PO No. (no "Shipping Mark:" caption,
+    # just the value itself) in bold, larger than the surrounding header text,
+    # but in the same font family (font_bold) so it stays visually consistent.
+    if shipping_mark:
+        sm_text = str(shipping_mark).strip().upper()
+        sm_y = top_y - 17
+        sm_max_w = right_margin_x - po_label_x
+        sm_size = fit_font_size(sm_text, font_bold, 13.0, 8.0, sm_max_w)
+        c.setFont(font_bold, sm_size)
+        c.drawString(po_label_x, sm_y, sm_text)
 
     # full-width PKG ID row, placed after the From/address block (5 lines)
     pkg_label_y = top_y - 5 * leading - 10
@@ -765,7 +776,7 @@ def draw_item_block(c, item: LabelItem, y_top, block_h, font_reg, font_bold,
 
 
 def render_label_page(c, carton_items_full, label_items, label_index, label_total,
-                       font_reg, font_bold):
+                       font_reg, font_bold, shipping_mark=None):
     c.setLineWidth(2.4)
     c.rect(MARGIN_X, MARGIN_BOTTOM, PAGE_W - 2 * MARGIN_X,
            PAGE_H - MARGIN_BOTTOM - 0.08 * inch, stroke=1, fill=0)
@@ -775,7 +786,8 @@ def render_label_page(c, carton_items_full, label_items, label_index, label_tota
     packaging_code = carton_items_full[0].packaging_code
 
     header_line_y = draw_header(c, po_no, packaging_code, PAGE_H - MARGIN_TOP - 0.10 * inch,
-                                 font_reg, font_bold, label_index=label_index, label_total=label_total)
+                                 font_reg, font_bold, label_index=label_index, label_total=label_total,
+                                 shipping_mark=shipping_mark)
 
     content_bottom = MARGIN_BOTTOM + 0.12 * inch
     content_top = header_line_y - 0.02 * inch
@@ -854,7 +866,7 @@ def build_label_plan(cartons, max_skus_per_label: int):
     return label_plan
 
 
-def write_pdf(cartons, label_plan, output_pdf: Path, font_reg: str, font_bold: str):
+def write_pdf(cartons, label_plan, output_pdf: Path, font_reg: str, font_bold: str, shipping_mark=None):
     c = pdfcanvas.Canvas(str(output_pdf), pagesize=(PAGE_W, PAGE_H), pageCompression=1)
     c.setTitle(output_pdf.stem)
     c.setAuthor("Carton label generator")
@@ -867,7 +879,7 @@ def write_pdf(cartons, label_plan, output_pdf: Path, font_reg: str, font_bold: s
         for label_index, label_items in enumerate(groups, start=1):
             pdf_page += 1
             render_label_page(c, carton_items_full, label_items, label_index, label_total,
-                               font_reg, font_bold)
+                               font_reg, font_bold, shipping_mark=shipping_mark)
             for item in label_items:
                 audit_rows.append(
                     {
@@ -902,7 +914,7 @@ def write_audit_csv(audit_rows, output_csv: Path):
 
 
 def main(input_file, output_dir=None, max_skus_per_label: int = MAX_SKUS_PER_LABEL_DEFAULT,
-         sheet_name: Optional[str] = None):
+         sheet_name: Optional[str] = None, shipping_mark: Optional[str] = None):
     input_file = Path(input_file)
     if not input_file.exists():
         raise FileNotFoundError(f"Input file not found: {input_file}")
@@ -925,7 +937,7 @@ def main(input_file, output_dir=None, max_skus_per_label: int = MAX_SKUS_PER_LAB
     print_validation_summary(df, meta, items, cartons, label_plan)
 
     font_reg, font_bold = setup_fonts()
-    pdf_pages, audit_rows = write_pdf(cartons, label_plan, output_pdf, font_reg, font_bold)
+    pdf_pages, audit_rows = write_pdf(cartons, label_plan, output_pdf, font_reg, font_bold, shipping_mark=shipping_mark)
     write_audit_csv(audit_rows, output_csv)
 
     print(f"\nDONE: {pdf_pages} label pages written for {len(cartons)} cartons.")
