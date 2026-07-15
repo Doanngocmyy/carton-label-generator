@@ -33,6 +33,16 @@ st.write(
     "4x6 inch carton labels (PDF) plus an audit CSV."
 )
 
+TEMPLATE_PATH = Path(__file__).parent / "template_packing_list.xlsx"
+if TEMPLATE_PATH.exists():
+    st.download_button(
+        "\U0001F4E5 Download template (mẫu Packing List)",
+        data=TEMPLATE_PATH.read_bytes(),
+        file_name="template_packing_list.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        help="Follow đúng cấu trúc cột trong file này khi chuẩn bị Packing List để upload.",
+    )
+
 uploaded_file = st.file_uploader("Packing List (.xlsx)", type=["xlsx"])
 
 max_skus = 3  # fixed default, matches the original script
