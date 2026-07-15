@@ -740,12 +740,12 @@ def draw_header(c, po_no, packaging_code, top_y, font_reg, font_bold,
     draw_code128_barcode(c, packaging_code, pkg_bar_x, pkg_bar_y, pkg_bar_w, pkg_bar_h,
                           font_reg, human_readable=False)
 
-    pkg_text_y = pkg_bar_y - 9
-    pkg_size = fit_font_size(packaging_code, font_reg, 7.2, 5.0, pkg_bar_w)
-    c.setFont(font_reg, pkg_size)
+    pkg_text_y = pkg_bar_y - 12
+    pkg_size = fit_font_size(packaging_code, font_bold, 11.0, 7.5, pkg_bar_w)
+    c.setFont(font_bold, pkg_size)
     c.drawCentredString(pkg_bar_x + pkg_bar_w / 2, pkg_text_y, packaging_code)
 
-    line_y = pkg_text_y - 8
+    line_y = pkg_text_y - 10
     c.setLineWidth(1.1)
     c.line(MARGIN_X + 0.10 * inch, line_y, PAGE_W - MARGIN_X - 0.10 * inch, line_y)
     return line_y
@@ -769,11 +769,15 @@ def draw_item_block(c, item: LabelItem, y_top, block_h, font_reg, font_bold,
 
     c.setFont(font_bold, label_fs)
     c.drawString(x0, y_top - 12, "SKU No:")
-    c.setFont(font_reg, value_fs)
+    # SKU value drawn bigger/bolder than the label for readability (per request);
+    # only this value grows -- the "SKU No:" caption itself stays the same size.
+    sku_target_fs = value_fs + 2.6
+    sku_min_fs = 6.5
+    c.setFont(font_bold, sku_target_fs)
     sku_x = x0 + 0.63 * inch
     sku_max_w = qty_x - sku_x - 0.08 * inch
-    sku_fs = fit_font_size(item.sku, font_reg, value_fs, 4.7, sku_max_w)
-    c.setFont(font_reg, sku_fs)
+    sku_fs = fit_font_size(item.sku, font_bold, sku_target_fs, sku_min_fs, sku_max_w)
+    c.setFont(font_bold, sku_fs)
     c.drawString(sku_x, y_top - 12, item.sku)
 
     c.setFont(font_bold, label_fs)
@@ -796,8 +800,12 @@ def draw_item_block(c, item: LabelItem, y_top, block_h, font_reg, font_bold,
         product_w = left_w - 0.28 * inch
         qty_bar_h = max(26, barcode_h - 6)
 
+    # EAN/product barcode number drawn bigger for readability (per request);
+    # the barcode bars themselves keep their compact, consistent size --
+    # only the human-readable digits underneath grow.
+    ean_text_fs = value_fs + 2.0
     draw_product_barcode(c, item, product_x, barcode_y, product_w, barcode_h,
-                          font_reg, font_size=max(5.5, value_fs))
+                          font_reg, font_size=max(7.5, ean_text_fs))
 
     qty_bar_y = barcode_y + 7
     draw_code128_barcode(c, item.quantity, qty_x + 0.01 * inch, qty_bar_y,
