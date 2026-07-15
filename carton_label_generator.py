@@ -141,6 +141,12 @@ CANONICAL_NAME = {
     "quantity": "Quantity",
 }
 
+# Optional fields: nice-to-have if present in the sheet, but never required
+# (older workbooks without this column must keep working unchanged).
+OPTIONAL_FIELDS = {
+    "shipping_mark": ["shipping mark", "shipping marks", "唛头"],
+}
+
 
 # ============================================================================
 # TEXT / NUMBER CLEANING
@@ -301,11 +307,19 @@ def determine_barcode_type(code: str):
 # ============================================================================
 
 def find_header_row_and_columns(ws, scan_rows=50):
-    """Locate the English header row and map canonical field -> column index."""
+    """Locate the English header row and map canonical field -> column index.
+    Also opportunistically detects OPTIONAL_FIELDS (e.g. Shipping Mark) in that
+    same row -- these are added to the returned map when present but never
+    required for a row to count as "the header row"."""
     alias_lookup = {}
     for key, aliases in REQUIRED_FIELDS.items():
         for a in aliases:
             alias_lookup[_norm(a)] = key
+
+    optional_alias_lookup = {}
+    for key, aliases in OPTIONAL_FIELDS.items():
+        for a in aliases:
+            optional_alias_lookup[_norm(a)] = key
 
     for r in range(1, min(scan_rows, ws.max_row) + 1):
         row_map = {_norm(ws.cell(r, c).value): c for c in range(1, ws.max_column + 1)}
@@ -314,6 +328,9 @@ def find_header_row_and_columns(ws, scan_rows=50):
             if norm_alias in row_map and key not in found:
                 found[key] = row_map[norm_alias]
         if len(found) == len(REQUIRED_FIELDS):
+            for norm_alias, key in optional_alias_lookup.items():
+                if norm_alias in row_map and key not in found:
+                    found[key] = row_map[norm_alias]
             item_col = None
             for c_name, c_idx in row_map.items():
                 if c_name in ("item#", "item #", "item", "项目"):
@@ -353,6 +370,7 @@ def load_packing_list(input_file: Path, sheet_name: Optional[str] = None):
     wb_raw = load_workbook(input_file, data_only=False)
     ws_raw = wb_raw[sheet_name]
     barcode_col = col_map["barcode"]
+    shipping_mark_col = col_map.get("shipping_mark")
 
     records = []
     for r in range(header_row + 1, ws.max_row + 1):
@@ -364,6 +382,7 @@ def load_packing_list(input_file: Path, sheet_name: Optional[str] = None):
         sku = ws.cell(r, col_map["sku"]).value
         barcode_val = ws.cell(r, col_map["barcode"]).value
         qty = ws.cell(r, col_map["quantity"]).value
+        shipping_mark_val = ws.cell(r, shipping_mark_col).value if shipping_mark_col else None
 
         if item_str and re.search(r"\btotal\b", item_str, re.IGNORECASE):
             break
@@ -388,6 +407,7 @@ def load_packing_list(input_file: Path, sheet_name: Optional[str] = None):
                 "BarCode/UPC": barcode_val,
                 "BarCode/UPC__number_format": number_format,
                 "Quantity": qty,
+                "Shipping Mark": shipping_mark_val,
             }
         )
 
@@ -397,6 +417,11 @@ def load_packing_list(input_file: Path, sheet_name: Optional[str] = None):
 
     df["Packaging code"] = df["Packaging code"].ffill()
     df["PO No."] = df["PO No."].ffill()
+    # Shipping Mark is optional and, when present, is normally filled on every
+    # row -- but forward-fill defensively in case a workbook merges it like
+    # Packaging code / PO No.
+    if "Shipping Mark" in df.columns:
+        df["Shipping Mark"] = df["Shipping Mark"].ffill()
 
     meta = {
         "header_row": header_row,
@@ -421,6 +446,7 @@ class LabelItem:
     barcode_type: str
     barcode_validation: str
     quantity: str
+    shipping_mark: str = ""
 
 
 _SKU_ALIAS_NORM = {_norm(a) for a in REQUIRED_FIELDS["sku"]}
@@ -428,6 +454,7 @@ _BARCODE_ALIAS_NORM = {_norm(a) for a in REQUIRED_FIELDS["barcode"]}
 _PO_ALIAS_NORM = {_norm(a) for a in REQUIRED_FIELDS["po"]}
 _PACKAGING_ALIAS_NORM = {_norm(a) for a in REQUIRED_FIELDS["packaging"]}
 _QUANTITY_ALIAS_NORM = {_norm(a) for a in REQUIRED_FIELDS["quantity"]}
+_SHIPPING_MARK_ALIAS_NORM = {_norm(a) for a in OPTIONAL_FIELDS["shipping_mark"]}
 
 
 def _is_header_echo_row(row) -> bool:
@@ -439,12 +466,16 @@ def _is_header_echo_row(row) -> bool:
     detected by matching each cell's own text against the known header
     aliases for *that* field.
     """
+    shipping_mark_is_echo = False
+    if "Shipping Mark" in row.index:
+        shipping_mark_is_echo = _norm(row["Shipping Mark"]) in _SHIPPING_MARK_ALIAS_NORM
     return (
         _norm(row["SKU#"]) in _SKU_ALIAS_NORM
         or _norm(row["BarCode/UPC"]) in _BARCODE_ALIAS_NORM
         or _norm(row["PO No."]) in _PO_ALIAS_NORM
         or _norm(row["Packaging code"]) in _PACKAGING_ALIAS_NORM
         or _norm(row["Quantity"]) in _QUANTITY_ALIAS_NORM
+        or shipping_mark_is_echo
     )
 
 
@@ -468,6 +499,9 @@ def build_items(df: pd.DataFrame) -> list[LabelItem]:
         po_no = clean_excel_value(row["PO No."]).strip()
         packaging_code = clean_excel_value(row["Packaging code"]).strip()
         qty = clean_quantity(row["Quantity"])
+        shipping_mark = ""
+        if "Shipping Mark" in row.index:
+            shipping_mark = clean_excel_value(row["Shipping Mark"]).strip()
 
         btype, encode_val, is_valid = determine_barcode_type(barcode_raw)
         validation = "VALID" if is_valid else ("EMPTY" if btype == "EMPTY" else "FALLBACK")
@@ -486,6 +520,7 @@ def build_items(df: pd.DataFrame) -> list[LabelItem]:
                 barcode_type=btype,
                 barcode_validation=validation,
                 quantity=qty,
+                shipping_mark=shipping_mark,
             )
         )
     return items
@@ -776,7 +811,7 @@ def draw_item_block(c, item: LabelItem, y_top, block_h, font_reg, font_bold,
 
 
 def render_label_page(c, carton_items_full, label_items, label_index, label_total,
-                       font_reg, font_bold, shipping_mark=None):
+                       font_reg, font_bold):
     c.setLineWidth(2.4)
     c.rect(MARGIN_X, MARGIN_BOTTOM, PAGE_W - 2 * MARGIN_X,
            PAGE_H - MARGIN_BOTTOM - 0.08 * inch, stroke=1, fill=0)
@@ -784,6 +819,10 @@ def render_label_page(c, carton_items_full, label_items, label_index, label_tota
     unique_pos = list(OrderedDict.fromkeys(i.po_no for i in carton_items_full if i.po_no))
     po_no = " / ".join(unique_pos)
     packaging_code = carton_items_full[0].packaging_code
+    # Shipping Mark comes straight from the Packing List's own "SHIPPING MARK"
+    # column (read per carton, same value for every item in that carton --
+    # verified consistent within a carton at load time upstream).
+    shipping_mark = carton_items_full[0].shipping_mark
 
     header_line_y = draw_header(c, po_no, packaging_code, PAGE_H - MARGIN_TOP - 0.10 * inch,
                                  font_reg, font_bold, label_index=label_index, label_total=label_total,
@@ -866,7 +905,7 @@ def build_label_plan(cartons, max_skus_per_label: int):
     return label_plan
 
 
-def write_pdf(cartons, label_plan, output_pdf: Path, font_reg: str, font_bold: str, shipping_mark=None):
+def write_pdf(cartons, label_plan, output_pdf: Path, font_reg: str, font_bold: str):
     c = pdfcanvas.Canvas(str(output_pdf), pagesize=(PAGE_W, PAGE_H), pageCompression=1)
     c.setTitle(output_pdf.stem)
     c.setAuthor("Carton label generator")
@@ -879,7 +918,7 @@ def write_pdf(cartons, label_plan, output_pdf: Path, font_reg: str, font_bold: s
         for label_index, label_items in enumerate(groups, start=1):
             pdf_page += 1
             render_label_page(c, carton_items_full, label_items, label_index, label_total,
-                               font_reg, font_bold, shipping_mark=shipping_mark)
+                               font_reg, font_bold)
             for item in label_items:
                 audit_rows.append(
                     {
@@ -895,6 +934,7 @@ def write_pdf(cartons, label_plan, output_pdf: Path, font_reg: str, font_bold: s
                         "pdf_page": pdf_page,
                         "barcode_type": item.barcode_type,
                         "barcode_validation": item.barcode_validation,
+                        "shipping_mark": item.shipping_mark,
                     }
                 )
     c.save()
@@ -905,7 +945,7 @@ def write_audit_csv(audit_rows, output_csv: Path):
     fieldnames = [
         "source_row", "po_no", "packaging_code", "sku", "barcode", "quantity",
         "carton_item_count", "label_index", "label_total", "pdf_page",
-        "barcode_type", "barcode_validation",
+        "barcode_type", "barcode_validation", "shipping_mark",
     ]
     with open(output_csv, "w", newline="", encoding="utf-8-sig") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -914,7 +954,7 @@ def write_audit_csv(audit_rows, output_csv: Path):
 
 
 def main(input_file, output_dir=None, max_skus_per_label: int = MAX_SKUS_PER_LABEL_DEFAULT,
-         sheet_name: Optional[str] = None, shipping_mark: Optional[str] = None):
+         sheet_name: Optional[str] = None):
     input_file = Path(input_file)
     if not input_file.exists():
         raise FileNotFoundError(f"Input file not found: {input_file}")
@@ -937,7 +977,7 @@ def main(input_file, output_dir=None, max_skus_per_label: int = MAX_SKUS_PER_LAB
     print_validation_summary(df, meta, items, cartons, label_plan)
 
     font_reg, font_bold = setup_fonts()
-    pdf_pages, audit_rows = write_pdf(cartons, label_plan, output_pdf, font_reg, font_bold, shipping_mark=shipping_mark)
+    pdf_pages, audit_rows = write_pdf(cartons, label_plan, output_pdf, font_reg, font_bold)
     write_audit_csv(audit_rows, output_csv)
 
     print(f"\nDONE: {pdf_pages} label pages written for {len(cartons)} cartons.")
