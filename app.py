@@ -28,9 +28,9 @@ import streamlit as st
 
 from carton_label_generator import main as generate_labels
 
-st.set_page_config(page_title="Carton Label Generator", page_icon="\U0001F4E6", layout="centered")
+st.set_page_config(page_title="CNDC Carton Label Generator", page_icon="\U0001F4E6", layout="centered")
 
-st.title("Carton Label Generator")
+st.title("CNDC Carton Label Generator")
 st.write(
     "Upload the Packing List Excel file. The app will generate scan-safe "
     "4x6 inch carton labels (PDF) plus an audit CSV."
